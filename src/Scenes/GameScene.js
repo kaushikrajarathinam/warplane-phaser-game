@@ -304,7 +304,7 @@ class GameScene extends Phaser.Scene {
         }
     
         // 🔁 Background scroll
-        this.background.tilePositionY -= 1;
+        this.background.tilePositionY -= 10;
     
         // 🧠 Tracking bullet updates
         this.enemyBullets.getChildren().forEach(bullet => {
