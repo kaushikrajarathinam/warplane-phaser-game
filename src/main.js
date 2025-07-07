@@ -7,7 +7,7 @@ const config = {
         default: 'arcade',
         arcade: { debug: false }
     },
-    scene: [TitleScene, GameScene, UIScene, GameOverScene]
+    scene: [TitleScene, GameScene, Level2Scene, Boss, UIScene, LevelSelect, LevelComplete, GameOverScene]
 };
 
 const game = new Phaser.Game(config);

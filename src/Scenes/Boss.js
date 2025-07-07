@@ -1,6 +1,6 @@
-class GameScene extends Phaser.Scene {
+class Boss extends Phaser.Scene {
     constructor() {
-        super('GameScene');
+        super('Boss');
     }
 
     preload() {
@@ -21,6 +21,24 @@ class GameScene extends Phaser.Scene {
             frameHeight: 32, 
             endFrame: 9      
         });
+
+        // boss
+        this.load.spritesheet('boss', 'assets/boss/boss.png', { frameWidth: 128, frameHeight: 512 });
+        this.load.spritesheet('bossDestruction', 'assets/boss/bossdestruction.png', {
+            frameWidth: 128,
+            frameHeight: 512
+        });
+        this.load.spritesheet('bossshoot', 'assets/boss/bossshoot.png', {
+            frameWidth: 128,      // Confirm or adjust if needed
+            frameHeight: 128     // Confirm or adjust if needed
+        });
+        this.load.spritesheet('bossBullet', 'assets/boss/bossbullet.png', {
+            frameWidth: 64,
+            frameHeight: 64
+        });
+
+
+
 
         this.load.spritesheet('enemy1', 'assets/enemy1/enemy1.png', { frameWidth: 64, frameHeight: 64 });
         this.load.spritesheet('enemy1Destruction', 'assets/enemy1/enemy1destruction.png', { frameWidth: 64, frameHeight: 64 });
@@ -62,6 +80,7 @@ this.load.spritesheet('enemy3shoot', 'assets/enemy3/enemy3shoot.png', { frameWid
 console.log(this.textures.get('enemy5bullet').frameTotal); // Should be 4
 console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3   
         this.background = this.add.tileSprite(400, 300, 800, 600, 'sky');
+        
 
 
         this.anims.create({
@@ -191,6 +210,58 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
             repeat: 0
         });
 
+        this.anims.create({
+            key: 'explodeBoss',
+            frames: this.anims.generateFrameNumbers('bossDestruction', { start: 0, end: 11 }),
+            frameRate: 15,
+            repeat: 0,
+            hideOnComplete: true
+        });
+        
+        this.anims.create({
+            key: 'bossIdle',
+            frames: this.anims.generateFrameNumbers('boss', { start: 0, end: 0 }),
+            frameRate: 1,
+            repeat: -1
+        });
+        
+
+        this.anims.create({
+            key: 'bossShootAnim',
+            frames: this.anims.generateFrameNumbers('bossshoot', { start: 0, end: 60 }),
+            frameRate: 24,
+            repeat: 0
+        });
+
+        this.anims.create({
+            key: 'bossBulletAnim',
+            frames: this.anims.generateFrameNumbers('bossBullet', { start: 0, end: 5 }),
+            frameRate: 10,
+            repeat: -1
+        });
+
+        const enemyTypes = ['enemy1', 'enemy2', 'enemy3', 'enemy4', 'enemy5', 'enemy6'];
+
+        enemyTypes.forEach((type) => {
+            const key = `${type}Destruction`;
+            const animKey = `reverse_${type}Spawn`;
+
+            const frames = this.anims.generateFrameNumbers(key); // Assuming you've already loaded this spritesheet
+            this.anims.create({
+                key: animKey,
+                frames: frames.reverse(),  // play frames in reverse
+                frameRate: 20,
+                repeat: 0
+            });
+        });
+
+                
+        this.bossMaxHP = 300;
+        this.bossHPBarBG = this.add.rectangle(400, 30, 300, 20, 0x000000).setOrigin(0.5).setVisible(false);
+        this.bossHPBar = this.add.rectangle(400, 30, 300, 20, 0xffa500).setOrigin(0.5).setVisible(false);
+
+        
+
         this.initGame();
 
         this.sfx = {
@@ -215,7 +286,6 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
     }
 
     initGame() {
-        
         this.waveNumber = 1;
         this.waveInProgress = true;
         this.maxWaves = 10;
@@ -239,12 +309,74 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
     
         // Initialize score and wave
         this.score = 0;
-        this.spawnWave();
     
         // Collision detection
         this.physics.add.overlap(this.playerBullets, this.enemies, this.handleEnemyHit, null, this);
         this.physics.add.overlap(this.enemyBullets, this.player, this.handlePlayerHit, null, this);
+    
+        this.canShoot = false;
+    
+        // Boss setup
+        this.bossMaxHP = 300;
+        this.boss = this.physics.add.sprite(400, -200, 'boss');
+        this.boss.setRotation(Math.PI);
+        this.boss.setData('hp', this.bossMaxHP);
+        this.bossGroup = this.physics.add.group();
+        this.bossGroup.add(this.boss);
+        this.physics.add.overlap(this.playerBullets, this.bossGroup, this.handleBossHit, null, this);
+    
+        // Boss HP bar (hidden at first)
+        this.bossHPBarBG = this.add.rectangle(400, 30, 300, 20, 0x000000).setOrigin(0.5).setVisible(false);
+        this.bossHPBar = this.add.rectangle(400, 30, 300, 20, 0xffa500).setOrigin(0.5).setVisible(false);
+    
+        // Tween boss down to center
+        this.tweens.add({
+            targets: this.boss,
+            y: 200,
+            duration: 3000,
+            ease: 'Sine.easeInOut',
+            onComplete: () => {
+                this.spawnOrbitingEnemies();
+                this.canShoot = true;
+                this.initBossShootLoop();
+    
+                // Show HP bar
+                this.bossHPBar.setVisible(true);
+                this.bossHPBarBG.setVisible(true);
+            }
+        });
     }
+    
+    initBossShootLoop() {
+        this.time.addEvent({
+            delay: 3000,
+            callback: () => {
+                if (!this.boss.active || !this.player.active) return;
+    
+                this.boss.play('bossShootAnim');
+    
+                this.boss.once('animationcomplete', () => {
+                    this.boss.setFrame(0); // ✅ SAFE reset
+                });
+    
+                const bullet = this.enemyBullets.create(this.boss.x, this.boss.y + 40, 'bossBullet');
+                bullet.play('bossBulletAnim');
+                bullet.setScale(1.2);
+                bullet.setData('damage', 5);
+    
+                const toPlayerX = this.player.x - this.boss.x;
+                const toPlayerY = this.player.y - (this.boss.y + 40);
+                const magnitude = Math.sqrt(toPlayerX * toPlayerX + toPlayerY * toPlayerY);
+                const speed = 300;
+    
+                bullet.setVelocity((toPlayerX / magnitude) * speed, (toPlayerY / magnitude) * speed);
+                bullet.setRotation(Math.atan2(toPlayerY, toPlayerX) + Math.PI / 2);
+            },
+            loop: true
+        });
+    }
+    
+    
 
     shoot() {
         if (!this.canShoot) return;
@@ -255,159 +387,164 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
         bullet.setVelocityY(-300);
         this.sfx.shoot.play();
     }
-
-    spawnWave() {
-        this.waveInProgress = true;
-        this.canShoot = false;
-
-        const enemyCount = Math.floor(10 + (this.waveNumber - 1) * ((35 - 10) / (this.maxWaves - 1)));
-        const patternOptions = ['circle', 'pentagon', 'star', 'zigzag', 'arc', 'cross'];
-        const pattern = Phaser.Utils.Array.GetRandom(patternOptions);
-
-        const positions = this.getEnemyPattern(pattern, enemyCount);
-        let arrivedCount = 0;
-
-        positions.forEach(pos => {
-            let enemyType = 'enemy1';
-            if (this.waveNumber >= 6) {
-                const roll = Phaser.Math.Between(1, 100);
-                if (roll <= 70) {
-                    enemyType = 'enemy1';
-                } else if (roll <= 85) {
-                    enemyType = 'enemy2';
-                } else {
-                    enemyType = 'enemy3';
+    initEnemyBehavior(enemy, type) {
+        const maxHitsMap = {
+            enemy1: 1,
+            enemy2: 2,
+            enemy3: 4,
+            enemy4: 2,
+            enemy5: 3,
+            enemy6: 5
+        };
+    
+        let maxHits = maxHitsMap[type] || 1;
+    
+        enemy.setData('hitCount', 0);
+        enemy.setData('maxHits', maxHits);
+        enemy.setData('enemyType', type);
+        enemy.setRotation(Math.PI);
+        enemy.setSize(30, 40);
+        enemy.setOffset(17, 12);
+    
+        // SHOOTING LOGIC
+        this.time.addEvent({
+            delay: Phaser.Math.Between(1000, 2500),
+            callback: () => {
+                if (!enemy.active) return;
+    
+                let bullet;
+    
+                if (type === 'enemy1') {
+                    enemy.play('enemy1Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy1'));
+                    bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy1bullet');
+                    bullet.play('anim_enemy1bullet');
+                    bullet.setVelocityY(250);
                 }
-            } else if (this.waveNumber >= 4) {
-                const roll = Phaser.Math.Between(1, 100);
-                if (roll <= 70) {
-                    enemyType = 'enemy1';
-                } else {
-                    enemyType = 'enemy2';
+    
+                if (type === 'enemy2') {
+                    enemy.play('enemy2Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy2'));
+                    const speed = 250;
+                    const angles = [Phaser.Math.DegToRad(120), Phaser.Math.DegToRad(60)];
+                    angles.forEach(angle => {
+                        bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy2bullet');
+                        bullet.play('anim_enemy2bullet');
+                        bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                        bullet.setRotation(angle + Math.PI / 2);
+                    });
                 }
-            }
-
-            const enemy = this.enemies.create(pos.x, pos.y - 100, enemyType);
-            
-            let maxHits = enemyType === 'enemy2' ? 2 : enemyType === 'enemy3' ? 4 : 1;
-
-            enemy.setData('hitCount', 0);
-            enemy.setData('maxHits', maxHits);
-            enemy.setData('enemyType', enemyType); 
-            enemy.setRotation(Math.PI);
-            enemy.setSize(30, 40);
-            enemy.setOffset(17, 12);
-
-            this.tweens.add({
-                targets: enemy,
-                y: pos.y,
-                duration: 1000,
-                ease: 'Power2',
-                onComplete: () => {
-                    arrivedCount++;
-                    if (arrivedCount === enemyCount) {
-                        this.canShoot = true;
-
-                        this.enemies.getChildren().forEach(enemy => {
-                            const offset = Phaser.Math.Between(30, 80);
-
-                            this.tweens.add({
-                                targets: enemy,
-                                x: { from: enemy.x, to: enemy.x + offset },
-                                duration: 2000,
-                                yoyo: true,
-                                repeat: -1
-                            });
-
-                            this.tweens.add({
-                                targets: enemy,
-                                y: { from: enemy.y, to: enemy.y + 10 },
-                                duration: 1000,
-                                yoyo: true,
-                                repeat: -1,
-                                ease: 'Sine.easeInOut'
-                            });
-
-                            this.time.addEvent({
-                                delay: Phaser.Math.Between(1500, 3500),
-                                callback: () => {
-                                    if (!enemy.active) return;
-
-                                    const type = enemy.texture.key;
-
-                                    if (type === 'enemy3') {
-                                        if (enemy.anims) {
-                                            enemy.play('enemy3Shoot');
-                                            enemy.once('animationcomplete', () => {
-                                                enemy.setTexture('enemy3'); // return to normal after shooting
-                                            });
-                                        }
-                                        const bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy3bullet');
-                                        bullet.play('anim_enemy3bullet');
-                                        bullet.setScale(1.5);
-                                        bullet.setData('phase', 'homing');
-                                        bullet.setData('createdAt', this.time.now);
-                                        bullet.setData('locked', false);
-                                        bullet.setData('tracking', true);
-                                        bullet.setData('enemy3_bullet_state', 'homing'); // to track bullet state
-                                    }
-
-                                    if (type === 'enemy1') {
-                                        enemy.play('enemy1Shoot');
-                                        enemy.once('animationcomplete', () => {
-                                            enemy.setTexture('enemy1');
-                                        });
-                                        const b = this.enemyBullets.create(enemy.x, enemy.y, 'enemy1bullet');
-                                        b.play('anim_enemy1bullet');
-                                        b.setVelocityY(250);
-                                        return;
-                                    }
-
-                                    if (type === 'enemy2') {
-                                        enemy.play('enemy2Shoot');
-                                        enemy.once('animationcomplete', () => {
-                                            enemy.setTexture('enemy2');
-                                        });
-                                        const speed = 250;
-                                    
-                                        const angles = [
-                                            Phaser.Math.DegToRad(120),  // diagonal left
-                                            Phaser.Math.DegToRad(60)    // diagonal right
-                                        ];
-                                    
-                                        angles.forEach(angle => {
-                                            const bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy_bullet_special');
-                                            bullet.play('anim_enemy2bullet');
-                                            bullet.setScale(1);
-                                            bullet.setVelocity(
-                                                Math.cos(angle) * speed,
-                                                Math.sin(angle) * speed
-                                            );
-                                    
-                                            // Rotate sprite to match angle (adjusted for correct orientation)
-                                            bullet.setRotation(angle + Math.PI / 2);
-                                    
-                                            this.tweens.add({
-                                                targets: bullet,
-                                                scaleX: 1.5,
-                                                scaleY: 1.5,
-                                                duration: 500,
-                                                yoyo: true,
-                                                repeat: -1,
-                                                ease: 'Sine.easeInOut'
-                                            });
-                                        });
-                                    }
-                                },
-                                loop: true
-                            });
-                        });
-                    }
+    
+                if (type === 'enemy3') {
+                    enemy.play('enemy3Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy3'));
+                    bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy3bullet');
+                    bullet.play('anim_enemy3bullet');
+                    bullet.setScale(1.5);
+                    bullet.setData('enemy3_bullet_state', 'homing');
+                    bullet.setData('createdAt', this.time.now);
                 }
+    
+                if (type === 'enemy4') {
+                    enemy.play('enemy4Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy4'));
+                    bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy4bullet');
+                    bullet.setTint(0xff0000);
+                    bullet.setVelocityY(350);
+                }
+    
+                if (type === 'enemy5') {
+                    enemy.play('enemy5Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy5'));
+                    bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy5bullet');
+                    bullet.setData('createdAt', this.time.now);
+                    bullet.setTint(0x39FF14);
+                    bullet.play('anim_enemy5bullet');
+                }
+    
+                if (type === 'enemy6') {
+                    enemy.play('enemy6Shoot');
+                    enemy.once('animationcomplete', () => enemy.setTexture('enemy6'));
+                    bullet = this.enemyBullets.create(enemy.x, enemy.y, 'enemy6bullet');
+                    bullet.setData('enemy6_state', 'homing');
+                    bullet.setTint(0xFFC0CB);
+                    bullet.setData('createdAt', this.time.now);
+                }
+            },
+            loop: true
+        });
+    }
+    
+
+    spawnOrbitingEnemies() {
+        this.orbiters = [];
+    
+        const numOrbiters = 10;
+        const radius = 100;
+        const angleStep = Phaser.Math.PI2 / numOrbiters;
+    
+        for (let i = 0; i < numOrbiters; i++) {
+            const angle = i * angleStep;
+            const x = this.boss.x + radius * Math.cos(angle);
+            const y = this.boss.y + radius * Math.sin(angle);
+    
+            const enemyKey = Phaser.Math.RND.pick(['enemy1', 'enemy2', 'enemy3', 'enemy4', 'enemy5', 'enemy6']);
+            const animKey = `reverse_${enemyKey}Spawn`;
+    
+            const spawnAnim = this.add.sprite(x, y, `${enemyKey}Destruction`);
+            spawnAnim.setRotation(Math.PI);
+            spawnAnim.play(animKey);
+    
+            spawnAnim.once('animationcomplete', () => {
+                spawnAnim.destroy();
+    
+                const orbiter = this.enemies.create(x, y, enemyKey);
+                orbiter.setData('angle', angle);
+                orbiter.setData('radius', radius);
+                orbiter.setData('slot', i);
+                orbiter.setData('enemyType', enemyKey);
+                orbiter.setRotation(Math.PI);
+    
+                this.initEnemyBehavior(orbiter, enemyKey);
+                this.orbiters[i] = orbiter;
+            });
+        }
+    }
+    
+    respawnOrbiter(slotIndex) {
+        this.time.delayedCall(10000, () => {
+            if (!this.boss.active) return;
+    
+            const radius = 100;
+            const angleStep = Phaser.Math.PI2 / 10;
+            const angle = slotIndex * angleStep;
+    
+            const x = this.boss.x + radius * Math.cos(angle);
+            const y = this.boss.y + radius * Math.sin(angle);
+            const enemyKey = Phaser.Math.RND.pick(['enemy1', 'enemy2', 'enemy3', 'enemy4', 'enemy5', 'enemy6']);
+            const animKey = `reverse_${enemyKey}Spawn`;
+    
+            const spawnAnim = this.add.sprite(x, y, `${enemyKey}Destruction`);
+            spawnAnim.setRotation(Math.PI);
+            spawnAnim.play(animKey);
+    
+            spawnAnim.once('animationcomplete', () => {
+                spawnAnim.destroy();
+    
+                const orbiter = this.enemies.create(x, y, enemyKey);
+                orbiter.setData('angle', angle);
+                orbiter.setData('radius', radius);
+                orbiter.setData('slot', slotIndex);
+                orbiter.setData('enemyType', enemyKey);
+                orbiter.setRotation(Math.PI);
+    
+                this.initEnemyBehavior(orbiter, enemyKey);
+                this.orbiters[slotIndex] = orbiter;
             });
         });
     }
-
+    
+    
     handleEnemyHit(bullet, enemy) {
         bullet.destroy();
     
@@ -470,7 +607,76 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
                 wrench.destroy();
             });
         }
+        // If this enemy is an orbiter, schedule its respawn
+        if (enemy.getData('slot') !== undefined) {
+            const slotIndex = enemy.getData('slot');
+            this.respawnOrbiter(slotIndex);
+        }
+
     }
+
+    handleBossHit(bullet, boss) {
+        bullet.destroy();
+    
+        const damage = Phaser.Math.Between(1, 3);
+        const currentHP = boss.getData('hp') - damage;
+        boss.setData('hp', currentHP);
+    
+        // Flash white
+        boss.setTintFill(0xffffff);
+        this.time.delayedCall(100, () => boss.clearTint());
+    
+        // Update HP bar
+        const hpRatio = Phaser.Math.Clamp(currentHP / this.bossMaxHP, 0, 1);
+        this.bossHPBar.width = 300 * hpRatio;
+    
+        if (currentHP <= 0) {
+            this.killBoss(boss);
+        }
+    }
+    
+
+    killBoss(boss) {
+        this.canShoot = false;
+    
+        const flashCount = 5;         // number of white flashes
+        const flashDuration = 100;    // ms per flash (on/off)
+        const totalFlashTime = flashCount * flashDuration * 2;
+    
+        let flashesDone = 0;
+    
+        // Pause animation if any
+        boss.anims.pause();
+    
+        const flashTimer = this.time.addEvent({
+            delay: flashDuration,
+            repeat: flashCount * 2 - 1,  // on + off = 2 steps per flash
+            callback: () => {
+                if (flashesDone % 2 === 0) boss.setTintFill(0xffffff);
+                else boss.clearTint();
+                flashesDone++;
+            }
+        });
+    
+        // After flashing, do the destruction
+        this.time.delayedCall(totalFlashTime + 200, () => {
+            const explosion = this.add.sprite(boss.x, 7, 'bossDestruction');
+            explosion.setOrigin(0.5, 0.5);
+            explosion.setFlipY(true);
+            explosion.play('explodeBoss');
+            boss.destroy();
+    
+            explosion.once('animationcomplete', () => {
+                explosion.destroy();
+                this.scene.start('GameOverScene', { score: this.score, win: true });
+            });
+    
+            this.sfx.explode.play();
+        });
+    }
+
+    
+        
     
     handlePlayerHit(player, bullet) {
         const bulletType = bullet.texture.key;
@@ -521,6 +727,7 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
             this.scene.start('GameOverScene', { score: this.score });
         }
     }
+    
 
     getEnemyPattern(patternName, count) {
         const centerX = 400;
@@ -639,28 +846,39 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
         this.player.body.velocity.x = Phaser.Math.Clamp(this.player.body.velocity.x, -MAX, MAX);
         this.player.body.velocity.y = Phaser.Math.Clamp(this.player.body.velocity.y, -MAX, MAX);
 
-        if (this.waveInProgress && this.enemies.countActive(true) === 0) {
-            this.waveInProgress = false;
-            this.canShoot = false;
-            if (this.waveNumber >= this.maxWaves) {
-                this.registry.set('unlockedLevel', 2);
-                this.scene.start('LevelComplete');
-                return;
-            }
-            this.time.delayedCall(2000, () => {
-                this.waveNumber++;
-                this.updateWaveText();
-                this.spawnWave();
-            });
-        }
+        // if (this.waveInProgress && this.enemies.countActive(true) === 0) {
+        //     this.waveInProgress = false;
+        //     this.canShoot = false;
+        //     if (this.waveNumber >= this.maxWaves) {
+        //         this.scene.stop('UIScene');
+        //         this.scene.start('GameOverScene', { score: this.score, win: true });
+        //         return;
+        //     }
+        //     this.time.delayedCall(2000, () => {
+        //         this.waveNumber++;
+        //         this.updateWaveText();
+        //         this.spawnWave();
+        //     });
+        // }
+        this.orbiters?.forEach(enemy => {
+            if (!enemy.active) return;
+            let angle = enemy.getData('angle') + 0.01; // rotates CCW
+            const radius = enemy.getData('radius');
+            const x = this.boss.x + radius * Math.cos(angle);
+            const y = this.boss.y + radius * Math.sin(angle);
+            enemy.setPosition(x, y);
+            enemy.setData('angle', angle);
+        });
 
         this.background.tilePositionY -= 10;
 
         this.enemyBullets.getChildren().forEach(b => {
             if (!b.active) return;
-            
-            // Enemy3 advanced bullet logic
-            if (b.texture.key === 'enemy3bullet') {
+        
+            const texture = b.texture.key;
+        
+            // --- Enemy 3: Homing -> Spinning -> Launch ---
+            if (texture === 'enemy3bullet') {
                 const state = b.getData('enemy3_bullet_state');
         
                 if (state === 'homing') {
@@ -670,8 +888,7 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
                     const speed = 120;
                     b.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
                     b.setRotation(angle + Math.PI / 2);
-                    
-                    // Transition to spinning aim after 800ms
+        
                     if (this.time.now - b.getData('createdAt') > 800) {
                         b.setVelocity(0, 0);
                         b.setData('enemy3_bullet_state', 'spinning');
@@ -682,9 +899,8 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
                     const dx = this.player.x - b.x;
                     const dy = this.player.y - b.y;
                     const angle = Math.atan2(dy, dx);
-                    b.setRotation(angle + Math.PI / 2); // Keep rotating to face player
+                    b.setRotation(angle + Math.PI / 2);
         
-                    // After 600ms of spinning, fire at locked vector
                     if (this.time.now - b.getData('spinStart') > 600) {
                         const fireAngle = Math.atan2(this.player.y - b.y, this.player.x - b.x);
                         const speed = 400;
@@ -694,6 +910,44 @@ console.log(this.textures.get('enemy6bullet').frameTotal); // Should be 3
                     }
                 }
             }
+        
+            // --- Enemy 5: Berserk Spiral Missile ---
+            else if (texture === 'enemy5bullet') {
+                const t = (this.time.now - b.getData('createdAt')) / 1000;
+            
+                const zigzagDuration = 0.3; // seconds per segment
+                const segment = Math.floor(t / zigzagDuration);
+                const dir = segment % 2 === 0 ? 1 : -1; // alternate left and right
+            
+                const speed = 200; // diagonal speed
+                const velocityX = dir * speed;
+                const velocityY = speed;
+            
+                b.setVelocity(velocityX, velocityY);
+                b.setRotation(Math.atan2(velocityY, velocityX) + Math.PI / 2);
+            }
+            // --- Enemy 6: Homing → Locked-In Trajectory ---
+            else if (texture === 'enemy6bullet') {
+                const state = b.getData('enemy6_state');
+                const createdAt = b.getData('createdAt');
+        
+                if (state === 'homing') {
+                    const elapsed = this.time.now - createdAt;
+                    if (elapsed >= 1000) {
+                        b.setData('enemy6_state', 'locked');
+                        return;
+                    }
+        
+                    const dx = this.player.x - b.x;
+                    const dy = this.player.y - b.y;
+                    const angle = Math.atan2(dy, dx);
+                    const speed = 160;
+                    b.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+                    b.setRotation(angle + Math.PI / 2);
+                }
+            }
         });
+        
+        
     }
 }
